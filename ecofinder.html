@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EcoFinder: animals anywhere on Earth</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+:root{--bg:#f1ede0;--ink:#16231c;--mute:#5d6b60;--card:#fbf9f1;--line:#d6cfb8;--accent:#b4781c;--deep:#1f3a2e}
+@media (prefers-color-scheme:dark){:root{--bg:#121c16;--ink:#ece8d8;--mute:#9faea2;--card:#1a2820;--line:#2e4034;--accent:#e0a444;--deep:#0c140f}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+header{padding:14px 18px;display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;border-bottom:1px solid var(--line)}
+h1{font:700 1.45rem/1.1 Georgia,"Times New Roman",serif;margin:0;letter-spacing:-.01em}
+form{display:flex;gap:8px;flex:1;min-width:240px}
+input,select,button{font:inherit;color:var(--ink)}
+input[type=text]{flex:1;min-width:0;padding:9px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card)}
+button{padding:9px 14px;border:0;border-radius:6px;background:var(--deep);color:#fff;cursor:pointer}
+button:hover{background:var(--accent)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(320px,1fr)}
+#map{min-height:320px;background:var(--deep);cursor:crosshair}
+#side{overflow:auto;padding:16px 18px}
+.filters{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:12px;color:var(--mute);font-size:.9rem}
+.filters select{padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--card)}
+.filters label{display:inline-flex;gap:5px;align-items:center}
+#status{margin:0 0 12px;color:var(--mute)}
+#status strong{color:var(--ink);font-family:Georgia,serif;font-size:1.1rem}
+ul{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+li{display:grid;grid-template-columns:64px 1fr;gap:12px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+li img{width:64px;height:64px;object-fit:cover;border-radius:4px;background:var(--line)}
+.n{font:600 1.05rem/1.2 Georgia,serif;text-transform:capitalize}
+.s{font-style:italic;color:var(--mute);font-size:.88rem}
+.m{font-size:.85rem;margin-top:4px;display:flex;flex-wrap:wrap;gap:4px 14px}
+.b{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.b span{font-size:.75rem;padding:1px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mute)}
+a{color:var(--accent)}
+.note{color:var(--mute);font-size:.8rem;margin-top:16px}
+@media (max-width:760px){html,body{height:auto}main{grid-template-columns:1fr;grid-template-rows:55vh auto}}
+</style>
+</head>
+<body>
+<header>
+  <h1>EcoFinder</h1>
+  <form id="search">
+    <input id="q" type="text" placeholder="Search a place, or click the map" aria-label="Search a place">
+    <button>Find animals</button>
+  </form>
+</header>
+
+<main>
+  <div id="map" role="application" aria-label="Satellite map"></div>
+  <div id="side">
+    <form id="sp" style="display:flex;gap:8px;margin-bottom:8px">
+      <input id="spq" type="text" placeholder="Find any animal, e.g. emperor penguin" aria-label="Find any animal">
+      <button>Find</button>
+    </form>
+    <ul id="spres" style="margin-bottom:12px"></ul>
+    <div class="filters">
+      <label>Radius <select id="radius"><option value="5">5 km</option><option value="25" selected>25 km</option><option value="100">100 km</option><option value="250">250 km</option></select></label>
+      <label>Group <select id="group">
+        <option value="all">All animals</option><option value="mammals">Mammals</option><option value="birds">Birds</option>
+        <option value="reptiles">Reptiles</option><option value="amphibians">Amphibians</option>
+        <option value="fish">Fish</option><option value="insects">Insects</option>
+      </select></label>
+    </div>
+    <div class="filters" id="mbcred">
+      <span style="flex-basis:100%">Optional: Movebank login (adds animal tracking studies)</span>
+      <input id="mbu" type="text" placeholder="Movebank username" aria-label="Movebank username" style="flex:1;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card)">
+      <input id="mbp" type="password" placeholder="Movebank password" aria-label="Movebank password" style="flex:1;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card)">
+    </div>
+    <div class="filters">
+      <label><input type="checkbox" id="nobugs"> Hide bugs (AI filter)</label>
+      <input type="password" id="akey" placeholder="Anthropic API key" aria-label="Anthropic API key" style="display:none;flex:1;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card)">
+    </div>
+    <p id="status" aria-live="polite">Click anywhere on the map to see which animals have been recorded nearby.</p>
+    <ul id="list"></ul>
+    <p class="note">Animals only; plants and fungi are filtered out. iNaturalist shows research-grade species counts. Observation.org and Earthdeck are read through GBIF, the open database both publish to: Observation.org is its own GBIF dataset, and Earthdeck's maps are built from GBIF records, so that source covers all GBIF datasets. Because GBIF also carries iNaturalist and Observation.org records, the sources overlap and counts should be read per source, not added up. GBIF counts come from a sample of up to 300 photographed records. Each species links to National Geographic and Earthdeck searches; neither offers a public data feed. Place search by OpenStreetMap Nominatim.</p>
+    <p class="note">OBIS lists ocean species by number of records (animals only). The Animal Telemetry Network count is the number of tagged-animal deployments with a tracked fix inside the box; its public data cover older US satellite tags, so many places will have none. NOAA's National Ocean Service has no wildlife lookup of its own. Its marine science programs (coastal science centers, marine sanctuaries, and the Integrated Ocean Observing System that runs the telemetry network) publish into OBIS-USA, the US national node of OBIS, which is what the "NOAA &amp; US federal marine data" source reads. That node also holds data from other agencies such as USGS and NMFS, so it is not NOS-only, and it is mostly US waters. Each species also links to the Ocean Service website. Two sources have no public data feed, so they are links rather than live results: <a href="https://www.wildlifeinsights.org" target="_blank" rel="noopener">Wildlife Insights</a> (camera-trap data, free account needed to download) and <a href="https://mol.org/regions" target="_blank" rel="noopener">Map of Life Regions</a> (expected and recorded species for any area you draw).</p>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const OBS_DATASET = '8a863029-f435-446a-821e-275f4f641165'; // Observation.org on GBIF
+const GROUPS = {
+  all:        { inat: 'Mammalia,Aves,Reptilia,Amphibia,Actinopterygii,Mollusca,Arachnida,Insecta,Animalia', gbif: { taxonKey: 1 } },
+  mammals:    { inat: 'Mammalia',       gbif: { classKey: 359 } },
+  birds:      { inat: 'Aves',           gbif: { classKey: 212 } },
+  reptiles:   { inat: 'Reptilia',       gbif: { classKey: 358 } },
+  amphibians: { inat: 'Amphibia',       gbif: { classKey: 131 } },
+  fish:       { inat: 'Actinopterygii', gbif: { classKey: 204 } },
+  insects:    { inat: 'Insecta',        gbif: { classKey: 216 } }
+};
+let marker, circle, last;
+
+const map = L.map('map', { worldCopyJump: true }).setView([5, 20], 3);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 18, attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18 }).addTo(map);
+
+const wrapLng = x => ((x + 540) % 360) - 180;
+map.on('click', e => explore(e.latlng.lat, wrapLng(e.latlng.lng)));
+
+$('search').addEventListener('submit', async e => {
+  e.preventDefault();
+  const q = $('q').value.trim(); if (!q) return;
+  $('status').textContent = 'Searching…';
+  try {
+    const r = await (await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q))).json();
+    if (!r.length) { $('status').textContent = 'Could not find that place. Try a city or region name.'; return; }
+    const p = r[0], b = p.boundingbox.map(Number);
+    map.fitBounds([[b[0], b[2]], [b[1], b[3]]]);
+    explore(+p.lat, +p.lon, p.display_name.split(',').slice(0, 2).join(','));
+  } catch { $('status').textContent = 'Place search failed. Check your connection, or click the map instead.'; }
+});
+$('mbp').addEventListener('change', () => { studies = null; last && explore(last.lat, last.lng, last.label); });
+['radius','group','nobugs'].forEach(id => $(id).addEventListener('change', () => last && explore(last.lat, last.lng, last.label)));
+$('nobugs').addEventListener('change', () => { $('akey').style.display = $('nobugs').checked ? '' : 'none'; if ($('nobugs').checked) $('akey').focus(); });
+$('akey').addEventListener('change', () => last && $('nobugs').checked && explore(last.lat, last.lng, last.label));
+
+/* ---- OBIS (ocean life) and US Animal Telemetry Network (tagged marine animals) ---- */
+function box(lat, lng, km) {
+  const dLat = km / 111, dLon = Math.min(180, km / (111 * Math.max(0.05, Math.cos(lat * Math.PI / 180))));
+  const r = x => +x.toFixed(3);
+  return [r(Math.max(-90, lat - dLat)), r(Math.min(90, lat + dLat)), r(Math.max(-180, lng - dLon)), r(Math.min(180, lng + dLon))];
+}
+let usaNode;
+async function fromObisUsa(lat, lng, km) {   // OBIS-USA node: US federal marine data (NOAA, USGS, sanctuaries)
+  if (!usaNode) {
+    const r = await (await fetch('https://api.obis.org/v3/node')).json();
+    const n = (r.results || []).find(x => /usa|united states/i.test(x.name || x.title || ''));
+    if (!n) throw new Error('OBIS-USA node not found');
+    usaNode = n.id;
+  }
+  return fromObis(lat, lng, km, { nodeid: usaNode });
+}
+async function fromObis(lat, lng, km, extra = {}) {
+  const [s, n, w, e] = box(lat, lng, km);
+  const wkt = `POLYGON((${w} ${s},${e} ${s},${e} ${n},${w} ${n},${w} ${s}))`;
+  const res = await fetch('https://api.obis.org/v3/checklist?' + new URLSearchParams({ geometry: wkt, taxonid: 2, size: 100, ...extra }));
+  if (!res.ok) throw new Error('OBIS ' + res.status);
+  const by = new Map();
+  for (const r of (await res.json()).results || []) {
+    const nm = r.species || r.scientificName || '';
+    if (!/^[A-Z][a-z]+ [a-z]+/.test(nm)) continue;               // species only
+    const sci = nm.split(' ').slice(0, 2).join(' ');
+    const e = by.get(sci) || { sci, common: null, count: 0, photo: null };
+    e.count += r.records || 0; by.set(sci, e);
+  }
+  return [...by.values()];
+}
+async function fromAtn(lat, lng, km) {
+  const [s, n, w, e] = box(lat, lng, km);
+  const q = 'taxon_name,deploy_id&' + [`latitude>=${s}`, `latitude<=${n}`, `longitude>=${w}`, `longitude<=${e}`, 'distinct()'].map(encodeURIComponent).join('&');
+  const res = await fetch('https://erddap.ioos.us/erddap/tabledap/atn_cacheFromUrl_collection.json?' + q);
+  if (res.status === 404) return [];                              // ERDDAP's "no matching results"
+  if (!res.ok) throw new Error('ATN ' + res.status);
+  const by = new Map();
+  for (const [name] of (await res.json()).table.rows) {
+    if (!name) continue;
+    const e = by.get(name) || { sci: name, common: null, count: 0, photo: null };
+    e.count++; by.set(name, e);                                   // one row per tagged animal deployment
+  }
+  return [...by.values()];
+}
+
+/* ---- Movebank: tracking studies near a point (needs a free Movebank login) ---- */
+let studies = null;
+const hasMovebank = () => $('mbu').value.trim() && $('mbp').value;
+const trackLayer = L.layerGroup().addTo(map);
+let densityLayer;
+function parseCsv(t){const rows=[];let r=[],f='',q=false;for(let i=0;i<t.length;i++){const c=t[i];if(q){if(c=='"'){if(t[i+1]=='"'){f+='"';i++}else q=false}else f+=c}else if(c=='"')q=true;else if(c==','){r.push(f);f=''}else if(c=='\n'){r.push(f);rows.push(r);r=[];f=''}else if(c!='\r')f+=c}if(f||r.length){r.push(f);rows.push(r)}const h=rows.shift()||[];return rows.map(a=>Object.fromEntries(h.map((k,i)=>[k,a[i]||''])))}
+async function loadStudies() {
+  if (studies) return studies;
+  const u = $('mbu').value.trim(), p = $('mbp').value;
+  if (!u || !p) throw new Error('login');
+  const res = await fetch('https://www.movebank.org/movebank/service/direct-read?' + new URLSearchParams({
+    entity_type: 'study', attributes: 'id,name,taxon_ids,main_location_lat,main_location_long,number_of_individuals' }),
+    { headers: { Authorization: 'Basic ' + btoa(unescape(encodeURIComponent(u + ':' + p))) } });
+  if (!res.ok) throw new Error(res.status);
+  studies = parseCsv(await res.text()).filter(s => s.main_location_lat && s.main_location_long);
+  return studies;
+}
+const km2 = (a, b, c, d) => { const R = 6371, r = Math.PI / 180, x = (c - a) * r, y = (d - b) * r;
+  return 2 * R * Math.asin(Math.sqrt(Math.sin(x/2)**2 + Math.cos(a*r) * Math.cos(c*r) * Math.sin(y/2)**2)); };
+const studyUrl = id => 'https://www.movebank.org/cms/webapp?gwt_fragment=page=studies,path=study' + id;
+async function fromMovebank(lat, lng, km) {
+  const by = new Map();
+  for (const s of await loadStudies()) {
+    if (km2(lat, lng, +s.main_location_lat, +s.main_location_long) > km) continue;
+    for (const sci of s.taxon_ids.split(',').map(x => x.trim()).filter(Boolean)) {
+      const e = by.get(sci) || { sci, common: null, count: 0, photo: null, studies: [] };
+      e.count++; e.studies.push({ id: s.id, name: s.name }); by.set(sci, e);
+    }
+  }
+  return [...by.values()];
+}
+
+/* ---- find any animal anywhere: GBIF taxon search + global density overlay ---- */
+const vn = t => ((t.vernacularNames || []).find(v => v.language === 'eng') || t.vernacularNames?.[0] || {}).vernacularName || t.vernacularName || '';
+$('sp').addEventListener('submit', async e => {
+  e.preventDefault();
+  const q = $('spq').value.trim(); if (!q) return;
+  $('spres').innerHTML = '<li style="grid-template-columns:1fr">Searching…</li>';
+  try {
+    const r = await (await fetch('https://api.gbif.org/v1/species/search?' + new URLSearchParams({ q, highertaxonKey: 1, status: 'ACCEPTED', limit: 8 }))).json();
+    $('spres').innerHTML = r.results.length ? r.results.map(t => `<li style="grid-template-columns:1fr"><button type="button" data-k="${t.key}" data-n="${esc(t.canonicalName || t.scientificName)}" style="text-align:left">${esc(vn(t))} <i>${esc(t.canonicalName || t.scientificName)}</i> (${esc(String(t.rank).toLowerCase())})</button></li>`).join('')
+      : '<li style="grid-template-columns:1fr">No animal found. Try another name.</li>';
+  } catch { $('spres').innerHTML = '<li style="grid-template-columns:1fr">Species search failed. Check your connection.</li>'; }
+});
+$('spres').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) showSpecies(b.dataset.k, b.dataset.n); });
+async function showSpecies(key, name) {
+  if (densityLayer) densityLayer.remove(); trackLayer.clearLayers();
+  densityLayer = L.tileLayer(`https://api.gbif.org/v2/map/occurrence/density/{z}/{x}/{y}@1x.png?srs=EPSG:3857&bin=hex&hexPerTile=40&style=classic-noborder.poly&taxonKey=${key}`, { opacity: .85, maxZoom: 18 }).addTo(map);
+  map.setView([20, 0], 2);
+  $('list').innerHTML = '';
+  let msg = `<strong>${esc(name)}</strong><br>Every GBIF sighting of this animal is shaded on the map. Zoom in and click to see what else lives there.`;
+  if (hasMovebank()) {
+    try {
+      const hits = (await loadStudies()).filter(s => s.taxon_ids.toLowerCase().includes(name.toLowerCase()));
+      hits.forEach(s => L.circleMarker([+s.main_location_lat, +s.main_location_long], { radius: 6, color: '#fff', weight: 1, fillColor: '#2fb3ff', fillOpacity: .95 })
+        .bindPopup(`<b>${esc(s.name)}</b><br>${esc(s.number_of_individuals)} tracked animals<br><a href="${studyUrl(s.id)}" target="_blank" rel="noopener">Open in Movebank</a>`).addTo(trackLayer));
+      msg += `<br>Blue dots: ${hits.length} Movebank tracking stud${hits.length === 1 ? 'y' : 'ies'}.`;
+    } catch { msg += '<br>Movebank did not respond. Check your login; it may also block requests from web pages.'; }
+  }
+  $('status').innerHTML = msg;
+}
+
+/* ---- AI bug filter: Claude Haiku classifies species names; answers are cached in this browser ---- */
+async function filterBugs(rows, notes) {
+  const key = $('akey').value.trim();
+  if (!key) { notes.push('Paste an Anthropic API key to hide bugs.'); return rows; }
+  let cache = {};
+  try { cache = JSON.parse(localStorage.getItem('bugcache') || '{}'); } catch {}
+  const todo = rows.filter(r => !(r.sci in cache));
+  if (todo.length) {
+    try {
+      const list = todo.map(r => r.common ? `${r.sci} (${r.common})` : r.sci);
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01',
+                   'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001', max_tokens: 2000,
+          system: 'You sort animal species into "bugs" and "not bugs". Bugs are insects, spiders and other arachnids (including ticks and scorpions), centipedes, millipedes, and woodlice. Everything else (vertebrates, snails, slugs, worms, crabs, shrimp, jellyfish, etc.) is not a bug. Reply with only a JSON array of the scientific names that are bugs, copied exactly as given, with no other text.',
+          messages: [{ role: 'user', content: JSON.stringify(list) }] })
+      });
+      if (!res.ok) throw new Error(res.status);
+      const text = (await res.json()).content.map(c => c.text || '').join('');
+      const bugs = new Set(JSON.parse(text.replace(/```json|```/g, '').trim()));
+      todo.forEach(r => cache[r.sci] = bugs.has(r.sci));
+      try { localStorage.setItem('bugcache', JSON.stringify(cache)); } catch {}
+    } catch {
+      notes.push('The AI bug filter failed, so bugs are still shown. Check your API key and connection.');
+      return rows;
+    }
+  }
+  return rows.filter(r => !cache[r.sci]);
+}
+
+/* ---- sources: each returns [{sci, common, count, photo}] ---- */
+async function fromInat(lat, lng, km, g) {
+  const url = 'https://api.inaturalist.org/v1/observations/species_counts?' + new URLSearchParams({
+    lat, lng, radius: km, iconic_taxa: g.inat, quality_grade: 'research', per_page: 40, locale: 'en' });
+  const res = await fetch(url); if (!res.ok) throw new Error('iNaturalist ' + res.status);
+  return (await res.json()).results.map(r => ({
+    sci: r.taxon.name, common: r.taxon.preferred_common_name,
+    count: r.count, photo: r.taxon.default_photo && r.taxon.default_photo.square_url }));
+}
+async function fromGbif(lat, lng, km, g, datasetKey) {
+  const p = new URLSearchParams({ geoDistance: `${lat},${lng},${km}km`, mediaType: 'StillImage',
+    occurrenceStatus: 'PRESENT', limit: 300, ...g.gbif });
+  if (datasetKey) p.set('datasetKey', datasetKey);
+  const res = await fetch('https://api.gbif.org/v1/occurrence/search?' + p); if (!res.ok) throw new Error('GBIF ' + res.status);
+  const by = new Map();
+  for (const o of (await res.json()).results) {
+    if (o.kingdom && o.kingdom !== 'Animalia') continue;       // animals only
+    const sci = o.species || o.acceptedScientificName; if (!sci) continue;
+    const e = by.get(sci) || { sci, common: o.vernacularName, count: 0, photo: null };
+    e.count++;
+    e.common = e.common || o.vernacularName;
+    const img = (o.media || []).find(m => m.type === 'StillImage' && m.identifier);
+    e.photo = e.photo || (img && img.identifier);
+    by.set(sci, e);
+  }
+  return [...by.values()];
+}
+
+async function explore(lat, lng, label) {
+  last = { lat, lng, label };
+  const km = +$('radius').value, g = GROUPS[$('group').value];
+  const jobs = [];
+  jobs.push(['iNaturalist',     fromInat(lat, lng, km, g)]);
+  jobs.push(['Observation.org', fromGbif(lat, lng, km, g, OBS_DATASET)]);
+  jobs.push(['Earthdeck',       fromGbif(lat, lng, km, g)]);
+  jobs.push(['OBIS',             fromObis(lat, lng, km)]);
+  jobs.push(['OBIS-USA',         fromObisUsa(lat, lng, km)]);
+  jobs.push(['ATN tagged animals', fromAtn(lat, lng, km)]);
+  if (hasMovebank()) jobs.push(['Movebank studies', fromMovebank(lat, lng, km)]);
+  if (marker) marker.remove(); if (circle) circle.remove();
+  marker = L.marker([lat, lng]).addTo(map);
+  circle = L.circle([lat, lng], { radius: km * 1000, color: '#e0a444', weight: 2, fillOpacity: .12, interactive: false }).addTo(map);
+  $('list').innerHTML = '';
+  if (!jobs.length) { $('status').textContent = 'Select at least one source.'; return; }
+  $('status').textContent = 'Looking up animals…';
+  const out = await Promise.allSettled(jobs.map(j => j[1]));
+  const merged = new Map(), failed = [];
+  out.forEach((r, i) => {
+    const src = jobs[i][0];
+    if (r.status !== 'fulfilled') {
+      failed.push(src.startsWith('Movebank') ? 'Movebank did not respond. Check your login; it may also block requests from web pages.' : `Could not reach ${src}.`);
+      return; }
+    for (const s of r.value) {
+      const k = s.sci.toLowerCase();
+      const e = merged.get(k) || { sci: s.sci, common: null, photo: null, per: {}, studies: [] };
+      e.common = e.common || s.common; e.photo = e.photo || s.photo; e.per[src] = s.count;
+      if (s.studies) e.studies = e.studies.concat(s.studies);
+      merged.set(k, e);
+    }
+  });
+  let rows = [...merged.values()];
+  if ($('nobugs').checked && rows.length) {
+    $('status').textContent = 'Asking Claude which of these are bugs…';
+    rows = await filterBugs(rows, failed);
+  }
+  render(rows, label || `${lat.toFixed(2)}, ${lng.toFixed(2)}`, km, failed);
+}
+
+function render(rows, label, km, failed) {
+  const warn = failed.length ? `<br>${esc(failed.join(' '))}` : '';
+  if (!rows.length) { $('status').innerHTML = `No recorded animals within ${km} km. Try a larger radius or another spot.` + warn; return; }
+  rows.sort((a, b) => Object.keys(b.per).length - Object.keys(a.per).length ||
+    Object.values(b.per).reduce((x, y) => x + y) - Object.values(a.per).reduce((x, y) => x + y));
+  rows = rows.slice(0, 80);
+  $('status').innerHTML = `<strong>${esc(label)}</strong><br>${rows.length} species within ${km} km` + warn;
+  $('list').innerHTML = rows.map(r => {
+    const name = r.common || r.sci;
+    const q = encodeURIComponent(name + ' ' + r.sci);
+    const ng = 'https://www.google.com/search?q=' + encodeURIComponent('site:nationalgeographic.com animals ' + name);
+    const ed = 'https://www.google.com/search?q=' + encodeURIComponent('site:earthdeck.co ' + name);
+    const badges = Object.entries(r.per).map(([s, c]) => `<span>${esc(s)}: ${c}</span>`).join('');
+    return `<li>
+      <img src="${esc(r.photo || '')}" alt="${esc(name)}" loading="lazy" onerror="this.style.visibility='hidden'">
+      <div><div class="n">${esc(name)}</div><div class="s">${esc(r.sci)}</div>
+      <div class="b">${badges}</div>
+      <div class="m"><a href="${ng}" target="_blank" rel="noopener">National Geographic</a>
+      <a href="${ed}" target="_blank" rel="noopener">Earthdeck</a>
+      <a href="https://www.google.com/search?q=${encodeURIComponent('site:mol.org ' + r.sci)}" target="_blank" rel="noopener">Map of Life</a>
+      <a href="https://www.google.com/search?q=${encodeURIComponent('site:oceanservice.noaa.gov ' + name)}" target="_blank" rel="noopener">NOAA Ocean Service</a>
+      <a href="https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(r.sci)}" target="_blank" rel="noopener">Wikipedia</a>
+      ${r.studies && r.studies.length ? `<a href="${studyUrl(r.studies[0].id)}" target="_blank" rel="noopener">Movebank study</a>` : ''}</div></div></li>`;
+  }).join('');
+}
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+</script>
+</body>
+</html>
